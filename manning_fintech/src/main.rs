@@ -26,7 +26,6 @@ struct Accounts {
 }
 
 impl Accounts {
-
     /// Returns an empty instance of the [`Accounts`] type
     pub fn new() -> Self {
         Accounts {
@@ -100,7 +99,42 @@ impl Accounts {
         recipient: &str,
         amount: u64,
     ) -> Result<(Tx, Tx), AccountingError> {
-       todo!();
+        // Concerns:
+        // 1) Need to ensure sender and recipient exist
+        //     error of AccountingError::AccountNotFound
+        // 2) Ensure sender has funds to cover withdrawal
+        //     error of AccountingError::UnderFunded
+        // 3) Ensure recipient can received and doesn't overflow
+        //     error of AccountingError:OverFunded
+        //     *if* an error occurs here we don't want to lose money from senders account
+        //
+        match self.withdraw(sender, amount) {
+            Ok(w_tx) => {
+                match self.deposit(recipient, amount) {
+                    Ok(d_tx) => {
+                        // Success, return both transactions
+                        Ok((w_tx,d_tx))
+                    },
+                    Err(d_err) => {
+                        // We saw an error from depositing to recipient,
+                        // yet we already deducted from sender, let's reverse the deduction
+                        match self.deposit(sender, amount) {
+                            Ok(_) => Err(d_err),
+                            Err(e) => {
+                                // Not ideal, we are swallowing the error from deposit to recipient
+                                // and just sending back the error from deposit to sender
+                                // Not ideal, unsure best thing for this case without making larger changes
+                                Err(e)
+                            },
+                        }
+                    }
+                }
+            },
+            Err(w_err) => {
+                // Returning the error we received from 'withdraw'
+                Err(w_err)
+            }
+        }
     }
 }
 
