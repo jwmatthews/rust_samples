@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-
 /// An application-specific error type
 #[derive(Debug)]
 enum AccountingError {
@@ -15,8 +14,8 @@ enum AccountingError {
 #[derive(Debug)]
 pub enum Tx {
     // Add variants for storing withdraw/deposit transactions
-    Deposit{ account: String, amount: u64},
-    Withdraw{ account: String, amount: u64},
+    Deposit { account: String, amount: u64 },
+    Withdraw { account: String, amount: u64 },
 }
 
 /// A type for managing accounts and their current currency balance
@@ -29,7 +28,7 @@ impl Accounts {
     /// Returns an empty instance of the [`Accounts`] type
     pub fn new() -> Self {
         Accounts {
-            accounts: Default::default()
+            accounts: Default::default(),
         }
     }
 
@@ -93,7 +92,7 @@ impl Accounts {
     ///
     /// # Errors
     /// The account doesn't exist
-    pub fn send(
+    pub fn send_version1(
         &mut self,
         sender: &str,
         recipient: &str,
@@ -113,8 +112,8 @@ impl Accounts {
                 match self.deposit(recipient, amount) {
                     Ok(d_tx) => {
                         // Success, return both transactions
-                        Ok((w_tx,d_tx))
-                    },
+                        Ok((w_tx, d_tx))
+                    }
                     Err(d_err) => {
                         // We saw an error from depositing to recipient,
                         // yet we already deducted from sender, let's reverse the deduction
@@ -125,14 +124,60 @@ impl Accounts {
                                 // and just sending back the error from deposit to sender
                                 // Not ideal, unsure best thing for this case without making larger changes
                                 Err(e)
-                            },
+                            }
                         }
                     }
                 }
-            },
+            }
             Err(w_err) => {
                 // Returning the error we received from 'withdraw'
                 Err(w_err)
+            }
+        }
+    }
+
+    /// Withdraws the amount from the sender account and deposits it in the recipient account.
+    ///
+    /// # Errors
+    /// The account doesn't exist
+    pub fn send(
+        &mut self,
+        sender: &str,
+        recipient: &str,
+        amount: u64,
+    ) -> Result<(Tx, Tx), AccountingError> {
+        // Concerns:
+        // 1) Need to ensure sender and recipient exist
+        //     error of AccountingError::AccountNotFound
+        // 2) Ensure sender has funds to cover withdrawal
+        //     error of AccountingError::UnderFunded
+        // 3) Ensure recipient can received and doesn't overflow
+        //     error of AccountingError:OverFunded
+        //     *if* an error occurs here we don't want to lose money from senders account
+        //
+        if self.accounts.contains_key(sender)  // sender exists
+            && self.accounts.contains_key(recipient) // recipient exists
+            && self
+            .accounts
+            .get(sender)
+            .map(|amt| *amt >= amount) // sender has sufficient funds
+            .unwrap_or(false)
+        {
+            // The ? operator is a built-in shorthand for
+            // if let Err(e) = my_func_call() { return Err(e); }
+            let tx_withdraw = self.withdraw(sender, amount)?;
+            self.deposit(recipient, amount)
+                .map_err(|e| {
+                    // return the funds to the sender on error
+                    self.deposit(sender, amount).unwrap();
+                    e
+                })
+                .map(|tx_deposit| (tx_withdraw, tx_deposit))
+        } else {
+            if !self.accounts.contains_key(sender) {
+                Err(AccountingError::AccountNotFound(sender.to_string()))
+            } else {
+                Err(AccountingError::AccountNotFound(recipient.to_string()))
             }
         }
     }
