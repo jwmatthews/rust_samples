@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::io;
+
 
 /// An application-specific error type
 #[derive(Debug)]
@@ -176,14 +178,50 @@ impl Accounts {
         } else {
             if !self.accounts.contains_key(sender) {
                 Err(AccountingError::AccountNotFound(sender.to_string()))
-            } else {
+            } else if !self.accounts.contains_key(recipient) {
                 Err(AccountingError::AccountNotFound(recipient.to_string()))
+            } else {
+                // Case for error on underfunded was missing, would have
+                // been reported as a missing 'recipient'.
+                Err(AccountingError::AccountUnderFunded(sender.to_string(), amount))
             }
         }
     }
 }
 
+
+fn read_from_stdin(label: &str) -> String {
+    // This function should print the label to the command line.
+    // After that, wait for user input that is terminated by a newline and return it.
+    // Use trim() to make sure the input is sanitized.
+    let mut user_input = String::new();
+    let stdin = io::stdin();
+
+    println!("{}", label);
+    stdin.read_line(&mut user_input).expect("Problem reading from stdin");
+    user_input.trim().to_string()
+}
+
 fn main() {
+
+    let mut ledger = Accounts::new();
+
+    // deposit, withdraw, send, print, quit
+    loop {
+        let command = read_from_stdin("Input: ");
+        match command {
+            "deposit" => _,
+            "withdraw" => _,
+            "send" => _,
+            "print" => _,
+            "quit" => _,
+            _ => println!("Didn't recognize '{}' as a known command", command);
+        }
+    }
+
+}
+
+fn main_old() {
     println!("Hello, accounting world!");
 
     // We are using simple &str instances as keys
