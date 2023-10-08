@@ -1,6 +1,6 @@
 
 use aws_sdk_iam::{self, Client};
-use aws_sdk_iam::types::{AccessKeyMetadata, User};
+use aws_sdk_iam::types::{AccessKeyLastUsed, AccessKeyMetadata, User};
 use aws_sdk_iam::error::SdkError;
 use aws_sdk_iam::operation::list_access_keys::ListAccessKeysError;
 use aws_sdk_iam::operation::list_users::{ListUsersError};
@@ -44,15 +44,10 @@ TODO:
 
  */
 
-pub struct KeyEntry {
-    create_date: DateTime,
-    last_access_date: DateTime,
-    key_id: String,
-}
 
 pub struct UserEntry {
     pub user: User,
-    pub last_access_date: DateTime,
+    pub last_access_date: Option<DateTime>,
     pub keys: Vec<AccessKeyMetadata>,
 }
 
@@ -73,10 +68,6 @@ pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkErr
         Ok(users) => {
             info!("{} users found", users.len());
             for user in users.iter().take(5) {
-                /*let user_name = match &user.user_name {
-                    Some(name) => { name }
-                    None => {"noname"}
-                };*/
                 let user_name = user.clone().user_name.unwrap_or("noname".to_string());
                 let access_keys = match list_access_keys(client.clone(), user_name.as_str()).await {
                     Ok(keys) => { keys }
@@ -85,14 +76,15 @@ pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkErr
                         Vec::new()
                     }
                 };
-                let last_key_entry_used = match determine_last_access_date(client.clone(), access_keys.clone()).await {
-                    Ok(entry) => { entry }
-                    Err(e) => {
-                        error!("Error getting last access date for user {}: {}", user_name, e);
-                        KeyEntry { create_date: DateTime::from_secs(0), last_access_date: DateTime::from_secs(0), key_id: "".to_string() }
+                match determine_last_access_date(client.clone(), access_keys.clone()).await {
+                    Some(lku) => {
+                        entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: lku.last_used_date });
+                    }
+                    None => {
+                        error!("We didn't find a last access date for user {}", user_name);
+                        entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: None });
                     }
                 };
-                entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: last_key_entry_used.last_access_date } );
 
             }
             Ok(entries)
@@ -133,13 +125,54 @@ pub async fn get_access_key_last_used(client: Client, key_id: &str) -> Result<Ge
         .await
 }
 
-pub async fn determine_last_access_date(client: Client, access_keys: Vec<AccessKeyMetadata>) -> Result<KeyEntry, SdkError<GetAccessKeyLastUsedError>> {
-    let mut entry = KeyEntry { create_date: DateTime::from_secs(0), last_access_date: DateTime::from_secs(0), key_id: "".to_string() };
-    let mut last_date = DateTime::from_secs(0);
-    for key in access_keys {
-        let k = get_access_key_last_used(client.clone(), key.clone().access_key_id.unwrap_or_default().as_str()).await;
-        entry.key_id = key.clone().access_key_id.unwrap_or_default().to_string();
-        entry.last_access_date = k.ok().unwrap().access_key_last_used.unwrap().last_used_date.unwrap();
-    }
-    Ok(entry)
+pub async fn determine_last_access_date(client: Client, access_keys: Vec<AccessKeyMetadata>) -> Option<AccessKeyLastUsed> {
+
+    let mut saved_last_used : Option<AccessKeyLastUsed> = None;
+
+    for key in &access_keys {
+        let tmp_last_used = match get_access_key_last_used(client.clone(), key.clone().access_key_id.unwrap_or_default().as_str()).await {
+            Ok(resp) => {
+                info!("Response: {:?}", resp);
+                match resp.access_key_last_used {
+                    Some(aklu) => {
+                        info!("\tLast used: {:?}", aklu);
+                        match aklu.last_used_date {
+                            Some(val_last_used_date) => {
+                                info!("\tLast used date: {:?}", val_last_used_date);
+                                Some(aklu.clone())
+                            }
+                            None => {
+                                error!("\tUnable to find last used date for {:?}", resp.user_name);
+                                None
+                            }
+                        }
+                    }
+                    None => {
+                        error!("\tUnable to find last used date");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error: {:?}", e);
+                None
+            }
+        };
+
+        // Check the actual last used date value to ensure it is set, we often see keys that have not been used so they have no last used date
+        // If it is set, then find the most recent key which has been used and save it so we can return it later
+        if tmp_last_used.is_some() && tmp_last_used.as_ref().unwrap().last_used_date.is_some() {
+            // We ensured that this key has a last_used_date, so we can safely unwrap the value
+            if saved_last_used.is_none() {
+                // First time through with a valid date, so set the value
+                saved_last_used = tmp_last_used;
+            } else {
+                // Check if the current key has a more recent last_used_date than what we saved
+                if tmp_last_used.as_ref().unwrap().last_used_date.unwrap() > saved_last_used.as_ref().unwrap().last_used_date.unwrap() {
+                    saved_last_used = tmp_last_used;
+                }
+            }
+        }
+    };
+    saved_last_used
 }

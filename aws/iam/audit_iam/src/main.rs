@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for entry in entries {
                 println!("User: {}", entry.user.user_name.unwrap_or_default());
                 for key in entry.keys {
-                    println!("  Key: id {}, status {}, create_date {:?}",
+                    println!("  Key: id {}, status {}, last_access_date {:?}",
                              key.access_key_id.unwrap_or_default(),
                              key.status.expect("No status").as_str(),
                              key.create_date.expect("No create date")
