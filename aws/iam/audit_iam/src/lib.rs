@@ -1,3 +1,4 @@
+#![warn(clippy::pedantic)]
 
 use aws_sdk_iam::{self, Client};
 use aws_sdk_iam::types::{AccessKeyLastUsed, AccessKeyMetadata, User};
@@ -51,15 +52,24 @@ pub struct UserEntry {
     pub keys: Vec<AccessKeyMetadata>,
 }
 
-pub fn get_client(config: SdkConfig) -> Client {
-    Client::new(&config)
+#[must_use]
+pub fn get_client(config: &SdkConfig) -> Client {
+    Client::new(config)
 }
 
+/// Will create a default `SdkConfig` from the environment and then call `run_with_config`
+/// # Errors
+///
+/// Will return `Err` if a problem is encountered talking to AWS APIs
 pub async fn run() -> Result<Vec<UserEntry>, SdkError<ListUsersError>> {
     let config = aws_config::load_from_env().await;
     run_with_config(config).await
 }
 
+/// Uses a specific `SdkConfig` to create a client
+/// # Errors
+///
+/// Will return `Err` if a problem is encountered talking to AWS APIs
 pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkError<ListUsersError>> {
     let mut entries = Vec::new();
     let client = aws_sdk_iam::Client::new(&config);
@@ -67,7 +77,8 @@ pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkErr
     match list_users(client.clone()).await {
         Ok(users) => {
             info!("{} users found", users.len());
-            for user in users.iter().take(5) {
+            //for user in users.iter().take(5) {
+            for user in users {
                 let user_name = user.clone().user_name.unwrap_or("noname".to_string());
                 let access_keys = match list_access_keys(client.clone(), user_name.as_str()).await {
                     Ok(keys) => { keys }
@@ -76,21 +87,19 @@ pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkErr
                         Vec::new()
                     }
                 };
-                match determine_last_access_date(client.clone(), access_keys.clone()).await {
-                    Some(lku) => {
-                        entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: lku.last_used_date });
-                    }
-                    None => {
-                        error!("We didn't find a last access date for user {}", user_name);
-                        entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: None });
-                    }
+                if let Some(lku) = determine_last_access_date(client.clone(), access_keys.clone()).await {
+                    entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: lku.last_used_date });
+                } else {
+                    error!("We didn't find a last access date for user {}", user_name);
+                    entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: None });
                 };
 
             }
             Ok(entries)
         }
         Err(e) => {
-            eprintln!("Error: {:?}", e);
+            //eprintln!("Error: {:?}", e);
+            error!("Error: {e}");
             Err(e)
         }
     }
