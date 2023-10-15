@@ -73,36 +73,26 @@ pub async fn run() -> Result<Vec<UserEntry>, SdkError<ListUsersError>> {
 pub async fn run_with_config(config: SdkConfig) -> Result<Vec<UserEntry>, SdkError<ListUsersError>> {
     let mut entries = Vec::new();
     let client = aws_sdk_iam::Client::new(&config);
-
-    match list_users(client.clone()).await {
-        Ok(users) => {
-            info!("{} users found", users.len());
-            //for user in users.iter().take(5) {
-            for user in users {
-                let user_name = user.clone().user_name.unwrap_or("noname".to_string());
-                let access_keys = match list_access_keys(client.clone(), user_name.as_str()).await {
-                    Ok(keys) => { keys }
-                    Err(e) => {
-                        error!("Error listing access keys for user {}: {}", user_name, e);
-                        Vec::new()
-                    }
-                };
-                if let Some(lku) = determine_last_access_date(client.clone(), access_keys.clone()).await {
-                    entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: lku.last_used_date });
-                } else {
-                    error!("We didn't find a last access date for user {}", user_name);
-                    entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: None });
-                };
-
+    let users = list_users(client.clone()).await?;
+    info!("{} users found", users.len());
+    for user in users {
+        let user_name = user.user_name.clone().unwrap_or("noname".to_string());
+        let access_keys = match list_access_keys(client.clone(), user_name.as_str()).await {
+            Ok(keys) => { keys }
+            Err(e) => {
+                error!("Error listing access keys for user {}: {}", user_name, e);
+                Vec::new()
             }
-            Ok(entries)
-        }
-        Err(e) => {
-            //eprintln!("Error: {:?}", e);
-            error!("Error: {e}");
-            Err(e)
-        }
+        };
+        if let Some(lku) = determine_last_access_date(client.clone(), access_keys.clone()).await {
+            entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: lku.last_used_date });
+        } else {
+            error!("We didn't find a last access date for user {}", user_name);
+            entries.push(UserEntry { user: user.clone(), keys: access_keys, last_access_date: None });
+        };
+
     }
+    Ok(entries)
 }
 
 pub async fn list_users(client: Client) -> Result<Vec<User>, SdkError<ListUsersError>> {
@@ -139,31 +129,24 @@ pub async fn determine_last_access_date(client: Client, access_keys: Vec<AccessK
     let mut saved_last_used : Option<AccessKeyLastUsed> = None;
 
     for key in &access_keys {
-        let tmp_last_used = match get_access_key_last_used(client.clone(), key.clone().access_key_id.unwrap_or_default().as_str()).await {
-            Ok(resp) => {
-                info!("Response: {:?}", resp);
-                match resp.access_key_last_used {
-                    Some(aklu) => {
-                        info!("\tLast used: {:?}", aklu);
-                        match aklu.last_used_date {
-                            Some(val_last_used_date) => {
-                                info!("\tLast used date: {:?}", val_last_used_date);
-                                Some(aklu.clone())
-                            }
-                            None => {
-                                error!("\tUnable to find last used date for {:?}", resp.user_name);
-                                None
-                            }
-                        }
+        let resp = get_access_key_last_used(client.clone(), key.clone().access_key_id.unwrap_or_default().as_str()).await.ok()?;
+        info!("Response: {:?}", resp);
+        let tmp_last_used = match resp.access_key_last_used {
+            Some(aklu) => {
+                info!("\tLast used: {:?}", aklu);
+                match aklu.last_used_date {
+                    Some(val_last_used_date) => {
+                        info!("\tLast used date: {:?}", val_last_used_date);
+                        Some(aklu.clone())
                     }
                     None => {
-                        error!("\tUnable to find last used date");
+                        error!("\tUnable to find last used date for {:?}", resp.user_name);
                         None
                     }
                 }
             }
-            Err(e) => {
-                error!("Error: {:?}", e);
+            None => {
+                error!("\tUnable to find last used date");
                 None
             }
         };
