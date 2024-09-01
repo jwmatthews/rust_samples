@@ -4,9 +4,36 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use serde_json; 
 
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct AnalysisReport {
+    pub rulesets: Vec<Ruleset>,
+}
+
+impl AnalysisReport {
+    /*pub fn get_impacted_file_names(&self) -> Vec<String> {
+        self.rulesets.iter()
+            .map(|ruleset| ruleset.violations.keys().cloned().collect())
+        self.violations.iter()
+            .map(|(file, _)| file.to_string())
+            .collect()
+    }*/
+    pub fn load_from_file(&mut self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut file = File::open(file_path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+    
+        let rulesets: Vec<Ruleset>= serde_yaml::from_str(&contents)?;
+        self.rulesets = rulesets;
+        Ok(())
+    }
+}
+
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Ruleset {
     pub name: String,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -24,6 +51,8 @@ pub struct AnalysisReport {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unmatched: Vec<String>,
 }
+
+
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -72,11 +101,41 @@ pub struct Incident {
     pub variables: HashMap<String, serde_json::Value>,
 }
 
-pub fn parse_yaml(file_path: &str) -> Result<Vec<AnalysisReport>, Box<dyn std::error::Error>> {
-    let mut file = File::open(file_path)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
-
-    let report: Vec<AnalysisReport>= serde_yaml::from_str(&contents)?;
+pub fn parse_yaml(file_path: &str) -> Result<AnalysisReport, Box<dyn std::error::Error>> {
+    let mut report = AnalysisReport::default();
+    report.load_from_file(file_path)?;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_coolstore_analysis() {
+        let mut report = AnalysisReport::default();
+        let result = report.load_from_file("samples/coolstore_analysis_output.yaml");
+        assert!(matches!(result, Ok(_))); 
+        assert_eq!(report.rulesets.len(), 26, "The vector length did not match the expected value.");
+        println!("Parsed report: {:?}", report);
+    }
+
+    #[test]
+    fn test_demo_output_analysis() {
+        let mut report = AnalysisReport::default();
+        let result = report.load_from_file("samples/demo-output.yaml");
+        assert!(matches!(result, Ok(_)));
+        assert_eq!(report.rulesets.len(), 1, "The vector length did not match the expected value.");
+        println!("Parsed report: {:?}", report);
+    }
+
+    /* 
+    #[test]
+    fn impacted_file_names() {
+        let report = parse_yaml("samples/demo-output.yaml").unwrap();
+        let impacted_files = report.impacted_file_names();
+        assert_eq!(impacted_files, ["src/main.rs"]);
+    }
+    */
+ 
 }
