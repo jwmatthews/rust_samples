@@ -75,7 +75,7 @@ impl AnalysisReport {
     }
 
     // Exploring an alternative implementation of impacted files, trying to avoid the 
-    //outer loop of uris like in original implementation
+    //couter loop of uris like in original implementation
     pub fn impacted_files_b(&self) -> HashMap<String, Vec<Ruleset>> {
         let uris = self.impacted_file_names();
         let uri_set: HashSet<String> = uris.into_iter().collect(); // Convert to HashSet for faster lookups
@@ -120,6 +120,101 @@ impl AnalysisReport {
     
         impacted_files
     }
+
+    // Exploring an alternative implementation of impacted files, trying to avoid the 
+    // couter loop of uris like in original implementation
+    pub fn impacted_files_c(&self) -> HashMap<String, HashMap<String, Ruleset>> {
+        // key: uri:
+        //  key: ruleset_name
+        //     violations:
+        //       key: violation_name: 
+        //           incidents:
+        //             - incident data //stripped to just that uri
+        let mut impacted_files = HashMap::<String, HashMap<String, Ruleset>>::new();
+        for ruleset in &self.rulesets {
+            for (violation_key, violation) in &ruleset.violations {
+                for incident in &violation.incidents {
+
+                    if impacted_files.contains_key(&incident.uri) {
+                        let impacted_rulesets = impacted_files.get_mut(&incident.uri).unwrap();
+                        if impacted_rulesets.contains_key(&ruleset.name) {
+                            let impacted_ruleset = impacted_rulesets.get_mut(&ruleset.name).unwrap();
+                            if impacted_ruleset.violations.contains_key(violation_key) {
+                                let violations = impacted_ruleset.violations.get_mut(violation_key).unwrap();
+                                violations.incidents.push(incident.clone());
+                            }
+                            else {
+                                let mut stripped_violation = violation.clone();
+                                stripped_violation.incidents = Vec::new();
+                                stripped_violation.incidents.push(incident.clone());
+                                impacted_ruleset.violations.insert(violation_key.clone(), stripped_violation);
+                            }
+                        } 
+                        else {
+                            let mut stripped_violation = violation.clone();
+                            stripped_violation.incidents = Vec::new();
+                            stripped_violation.incidents.push(incident.clone());
+
+                            let mut stripped_ruleset = ruleset.clone();
+                            stripped_ruleset.violations = HashMap::new();
+                            stripped_ruleset.tags = Vec::new();
+                            stripped_ruleset.insights = HashMap::new();
+                            stripped_ruleset.errors = HashMap::new();
+                            stripped_ruleset.unmatched = Vec::new();
+                            stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation);
+
+                            impacted_rulesets.insert(ruleset.name.clone(), stripped_ruleset);
+                        }
+                    } else {
+
+                        let mut stripped_violation = violation.clone();
+                        stripped_violation.incidents = Vec::new();
+                        stripped_violation.incidents.push(incident.clone());
+
+                        let mut stripped_ruleset = ruleset.clone();
+                        stripped_ruleset.violations = HashMap::new();
+                        stripped_ruleset.tags = Vec::new();
+                        stripped_ruleset.insights = HashMap::new();
+                        stripped_ruleset.errors = HashMap::new();
+                        stripped_ruleset.unmatched = Vec::new();
+                        stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation);
+                        
+                        let mut uri_rulesets = HashMap::<String, Ruleset>::new();
+                        uri_rulesets.insert(ruleset.name.clone(), stripped_ruleset);
+                        impacted_files.insert(incident.uri.clone(), uri_rulesets);
+                        //impacted_files.entry(incident.uri.clone()).or_insert(Vec::new()).push(ruleset.clone());
+                    } 
+
+                }
+            }
+        }
+        impacted_files
+    }
+           
+
+
+               /* if let Some(stripped_violation) = stripped_violation {
+                    let stripped_ruleset = stripped_ruleset.get_or_insert_with(|| {
+                        let mut r = ruleset.clone();
+                        r.violations = HashMap::new();
+                        r
+                    });
+                    stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation);
+                }
+            }*/
+
+            /*if let Some(stripped_ruleset) = stripped_ruleset {
+                for incident in stripped_ruleset.violations.values().flat_map(|v| &v.incidents) {
+                    impacted_files.entry(incident.uri.clone())
+                        .or_insert_with(HashMap::new)
+                        .entry(ruleset.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(stripped_ruleset.clone());
+                }
+            }
+        }*/
+  
+
 
     pub fn load_from_file(&mut self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut file = File::open(file_path)?;
@@ -202,6 +297,10 @@ pub struct Incident {
     pub variables: HashMap<String, serde_json::Value>,
 }
 
+// Key: uri, Value: HashMap<String, Ruleset>
+//      Key: ruleset name, Value: Vec<Ruleset>  
+//type ImpactedRuleset = HashMap<String, HashMap<String, Ruleset>>;
+
 pub fn parse_yaml(file_path: &str) -> Result<AnalysisReport, Box<dyn std::error::Error>> {
     let mut report = AnalysisReport::default();
     report.load_from_file(file_path)?;
@@ -271,7 +370,7 @@ mod tests {
         assert_eq!(impacted_files.len(), 424);
     }
 
-      #[test]
+    #[test]
     fn impacted_files_b() {
         let report = parse_yaml("samples/demo-output.yaml").unwrap();
         let impacted_files = report.impacted_files_b();
@@ -280,7 +379,52 @@ mod tests {
         let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
         let impacted_files = report.impacted_files_b();
         assert_eq!(impacted_files.len(), 424);
+
     }
+    
+    #[test]
+    fn impacted_files_c() {
+        let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
+        let impacted_files = report.impacted_files_c();
+        assert_eq!(impacted_files.len(), 424);
+        
+        let report = parse_yaml("samples/demo-output.yaml").unwrap();
+        let impacted_files = report.impacted_files_c();
+        assert_eq!(impacted_files.len(), 20);
+        
+        let expected_key = "file:///examples/customers-tomcat-legacy/pom.xml";
+        assert!(impacted_files.contains_key(expected_key), "The key '{}' should exist in the impacted_files", &expected_key);
+
+        let impacted_rulesets = impacted_files.get(expected_key).unwrap();
+        assert_eq!(impacted_rulesets.len(), 1);
+
+        let expected_ruleset_name = "konveyor-analysis";
+        assert!(impacted_rulesets.contains_key(expected_ruleset_name), "The key '{}' should exist in the impacted_rulesets", &expected_ruleset_name);
+         
+        let ruleset = impacted_rulesets.get("konveyor-analysis").unwrap();
+        assert_eq!(ruleset.violations.len(), 2);
+
+        let violation_name = "xml-pom-001";
+        let violation = ruleset.violations.get(violation_name).unwrap();
+        assert_eq!(violation.incidents.len(), 17);
+
+        let violation_name = "chain-pom-001";
+        let violation = ruleset.violations.get(violation_name).unwrap();
+        assert_eq!(violation.incidents.len(), 17);
+
+
+        /* 
+        let uri = "file:///examples/builtin/inclusion_tests/dir-0/inclusion-test.json";
+        let impacted_rulesets = impacted_files.get(uri).unwrap();
+        assert_eq!(impacted_rulesets.len(), 1);
+        let expected_violations = impacted_rulesets.get("konveyor-analysis").unwrap();
+        assert_eq!(expected_violations.len(), 1);   
+        let expected_violation = expected_violations.get("builtin-inclusion-test-json").unwrap();
+        assert_eq!(expected_violation.len(), 3);
+        */
+
+    }
+
 
 
 }
