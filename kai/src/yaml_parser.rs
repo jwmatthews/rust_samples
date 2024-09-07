@@ -31,99 +31,10 @@ impl AnalysisReport {
         vec
     }
 
-    /// This method returns the impacted files with their associated violations.
-    ///
-    /// # Returns
-    /// * A `HashMap<String, Vec<Ruleset>>` where the key is the uri and the value is a Vector of Rulsets. 
-    ///
-    pub fn impacted_files(&self) -> HashMap<String, Vec<Ruleset>> {
-        let mut impacted_files = HashMap::<String, Vec<Ruleset>>::new();
-      
-        // First we get the list of impacted file names
-        let uris = self.impacted_file_names();
-
-        for uri in uris {
-            // We iterate through all the rulesets
-            for ruleset in &self.rulesets {
-                // We clone the ruleset and remove the violation data 
-                //so we can readd just the data related to this uri
-                let mut stripped_ruleset = ruleset.clone();
-                stripped_ruleset.violations = HashMap::new();
-                // We iterate over all the violations in this ruleset
-                for (violation_key, violation) in &ruleset.violations {
-                    // We clone the violation and remove the incidents 
-                    let mut stripped_violation = violation.clone();
-                    stripped_violation.incidents = Vec::new();
-                    // We iterate over all the incidents in this violation
-                    for incident in &violation.incidents {
-                        if uri == incident.uri {
-                            // We add the incident to the stripped violation
-                            stripped_violation.incidents.push(incident.clone());
-                            // We add the stripped violation to the stripped ruleset
-                        }
-                    }
-                    if stripped_violation.incidents.len() > 0 {
-                        stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation.clone());
-                    }
-                }
-                if stripped_ruleset.violations.len() > 0 {
-                    impacted_files.entry(uri.clone()).or_insert(Vec::new()).push(stripped_ruleset.clone());
-                } 
-            }
-        }
-        impacted_files
-    }
-
+   
     // Exploring an alternative implementation of impacted files, trying to avoid the 
-    //couter loop of uris like in original implementation
-    pub fn impacted_files_b(&self) -> HashMap<String, Vec<Ruleset>> {
-        let uris = self.impacted_file_names();
-        let uri_set: HashSet<String> = uris.into_iter().collect(); // Convert to HashSet for faster lookups
-    
-        let mut impacted_files = HashMap::new();
-    
-        for ruleset in &self.rulesets {
-            let mut stripped_ruleset = None;
-    
-            for (violation_key, violation) in &ruleset.violations {
-                let mut stripped_violation = None;
-    
-                for incident in &violation.incidents {
-                    if uri_set.contains(&incident.uri) {
-                        let stripped_violation = stripped_violation.get_or_insert_with(|| {
-                            let mut v = violation.clone();
-                            v.incidents = Vec::with_capacity(violation.incidents.len());
-                            v
-                        });
-                        stripped_violation.incidents.push(incident.clone());
-                    }
-                }
-    
-                if let Some(stripped_violation) = stripped_violation {
-                    let stripped_ruleset = stripped_ruleset.get_or_insert_with(|| {
-                        let mut r = ruleset.clone();
-                        r.violations = HashMap::new();
-                        r
-                    });
-                    stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation);
-                }
-            }
-    
-            if let Some(stripped_ruleset) = stripped_ruleset {
-                for incident in stripped_ruleset.violations.values().flat_map(|v| &v.incidents) {
-                    impacted_files.entry(incident.uri.clone())
-                        .or_insert_with(Vec::new)
-                        .push(stripped_ruleset.clone());
-                }
-            }
-        }
-    
-        impacted_files
-    }
-
-    // Exploring an alternative implementation of impacted files, trying to avoid the 
-    // couter loop of uris like in original implementation
-    pub fn impacted_files_c(&self) -> HashMap<String, HashMap<String, Ruleset>> {
+    // outer loop of uris like in original implementation
+    pub fn impacted_files_ugly(&self) -> HashMap<String, HashMap<String, Ruleset>> {
         // key: uri:
         //  key: ruleset_name
         //     violations:
@@ -182,7 +93,6 @@ impl AnalysisReport {
                         let mut uri_rulesets = HashMap::<String, Ruleset>::new();
                         uri_rulesets.insert(ruleset.name.clone(), stripped_ruleset);
                         impacted_files.insert(incident.uri.clone(), uri_rulesets);
-                        //impacted_files.entry(incident.uri.clone()).or_insert(Vec::new()).push(ruleset.clone());
                     } 
 
                 }
@@ -191,30 +101,47 @@ impl AnalysisReport {
         impacted_files
     }
            
+  
+    pub fn impacted_files(&self) -> HashMap<String, HashMap<String, Ruleset>> {
+        // key: uri:
+        //  key: ruleset_name
+        //     violations:
+        //       key: violation_name: 
+        //           incidents:
+        //             - incident data //stripped to just that uri
+        let mut impacted_files = HashMap::<String, HashMap<String, Ruleset>>::new();
+        
+        for ruleset in &self.rulesets {
+            for (violation_key, violation) in &ruleset.violations {
+                for incident in &violation.incidents {
 
-
-               /* if let Some(stripped_violation) = stripped_violation {
-                    let stripped_ruleset = stripped_ruleset.get_or_insert_with(|| {
-                        let mut r = ruleset.clone();
-                        r.violations = HashMap::new();
-                        r
-                    });
-                    stripped_ruleset.violations.insert(violation_key.clone(), stripped_violation);
-                }
-            }*/
-
-            /*if let Some(stripped_ruleset) = stripped_ruleset {
-                for incident in stripped_ruleset.violations.values().flat_map(|v| &v.incidents) {
-                    impacted_files.entry(incident.uri.clone())
-                        .or_insert_with(HashMap::new)
-                        .entry(ruleset.name.clone())
-                        .or_insert_with(Vec::new)
-                        .push(stripped_ruleset.clone());
+                    impacted_files
+                        .entry(incident.uri.clone()) // Entry for the URI
+                        .or_insert_with(HashMap::new) // Insert a new ruleset HashMap if missing
+                        .entry(ruleset.name.clone()) // Entry for the ruleset name
+                        .or_insert_with(|| {
+                            let mut stripped_ruleset = ruleset.clone();
+                            stripped_ruleset.violations = HashMap::new();
+                            stripped_ruleset.tags.clear();
+                            stripped_ruleset.insights.clear();
+                            stripped_ruleset.errors.clear();
+                            stripped_ruleset.unmatched.clear();
+                            stripped_ruleset
+                        })
+                        .violations
+                        .entry(violation_key.clone()) // Entry for the violation
+                        .or_insert_with(|| {
+                            let mut stripped_violation = violation.clone();
+                            stripped_violation.incidents = Vec::new();
+                            stripped_violation
+                        })
+                        .incidents
+                        .push(incident.clone()); // Add the incident to the stripped violation
                 }
             }
-        }*/
-  
-
+        }
+        impacted_files
+    }
 
     pub fn load_from_file(&mut self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut file = File::open(file_path)?;
@@ -358,38 +285,15 @@ mod tests {
                 "file:///examples/builtin/inclusion_tests/dir-0/inclusion-test.json"];
         assert_eq!(impacted_files.sort(), expected_impacted_files.sort());
     }
-
-    #[test]
-    fn impacted_files() {
-        let report = parse_yaml("samples/demo-output.yaml").unwrap();
-        let impacted_files = report.impacted_files();
-        assert_eq!(impacted_files.len(), 20);
-
-        let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
-        let impacted_files = report.impacted_files();
-        assert_eq!(impacted_files.len(), 424);
-    }
-
-    #[test]
-    fn impacted_files_b() {
-        let report = parse_yaml("samples/demo-output.yaml").unwrap();
-        let impacted_files = report.impacted_files_b();
-        assert_eq!(impacted_files.len(), 20);
-
-        let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
-        let impacted_files = report.impacted_files_b();
-        assert_eq!(impacted_files.len(), 424);
-
-    }
     
     #[test]
-    fn impacted_files_c() {
+    fn impacted_files() {
         let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
-        let impacted_files = report.impacted_files_c();
+        let impacted_files = report.impacted_files();
         assert_eq!(impacted_files.len(), 424);
         
         let report = parse_yaml("samples/demo-output.yaml").unwrap();
-        let impacted_files = report.impacted_files_c();
+        let impacted_files = report.impacted_files();
         assert_eq!(impacted_files.len(), 20);
         
         let expected_key = "file:///examples/customers-tomcat-legacy/pom.xml";

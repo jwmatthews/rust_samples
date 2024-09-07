@@ -36,14 +36,14 @@ fn main() {
    
 
     let start = Instant::now();
-    let impacted_files_c = report.impacted_files_c();
+    let impacted_files = report.impacted_files();
     let duration = start.elapsed();
-    println!("Impacted files: {:?}", impacted_files_c.keys()); 
-    println!("# of impacted files: {:?}", impacted_files_c.len()); 
+    println!("Impacted files: {:?}", impacted_files.keys()); 
+    println!("# of impacted files: {:?}", impacted_files.len()); 
     println!("Test 'impacted_files_c' took: {:?}", duration);
     
     let expected_key = "file:///examples/customers-tomcat-legacy/pom.xml";
-    let rulesets = impacted_files_c.get(expected_key).unwrap();
+    let rulesets = impacted_files.get(expected_key).unwrap();
     println!("URI: `{}` Impacted rulesets: {:?}", expected_key, rulesets.len());
 
     let ruleset = rulesets.get("konveyor-analysis").unwrap();
