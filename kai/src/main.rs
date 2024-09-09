@@ -1,40 +1,13 @@
 mod yaml_parser;
-
+use std::collections::HashMap;
 use std::time::Instant;
 use yaml_parser::parse_yaml;
+use yaml_parser::Ruleset;
 
-
-fn main() {
-    /* 
-    match parse_yaml("samples/coolstore_analysis_output.yaml") {
-        Ok(report) => println!("Parsed report: {:?}", report),
-        Err(e) => eprintln!("Error parsing YAML: {}", e),
-    }
-
-    match parse_yaml("samples/demo-output.yaml") {
-        Ok(report) => println!("Parsed report: {:?}", report),
-        Err(e) => eprintln!("Error parsing YAML: {}", e),
-    } 
-    
-    let report = parse_yaml("samples/coolstore_analysis_output.yaml").unwrap();
-    
-    let mut start = Instant::now();
-    let impacted_files = report.impacted_files();
-    let mut duration = start.elapsed();
-    println!("# of impacted files: {:?}", impacted_files.len()); 
-    println!("Test 'impacted_files' took: {:?}", duration);
-    //println!("Impacted files: {:?}", impacted_files.keys());
-
-    start = Instant::now();
-    let impacted_files_b = report.impacted_files_b();
-    duration = start.elapsed();
-    println!("# of impacted files: {:?}", impacted_files_b.len()); 
-    println!("Test 'impacted_files_b' took: {:?}", duration);
-    */
-   
+#[allow(dead_code)]
+fn print_debug_demo_report() {
     let report = parse_yaml("samples/demo-output.yaml").unwrap();
    
-
     let start = Instant::now();
     let impacted_files = report.impacted_files();
     let duration = start.elapsed();
@@ -53,7 +26,24 @@ fn main() {
         println!("\tViolation: description {:?}", violation.description);
         println!("\tViolation: # incidents {:?}", violation.incidents.len());
     }   
-   // println!("URI: `{}` Impacted rulesets: {:?}", expected_key, impacted_rulesets.len());
+}
+
+fn main() {
+
+   //print_debug_demo_report();
+
+   match parse_yaml("samples/coolstore_analysis_output.yaml") {
+    Ok(report) => {
+        let impacted_files: HashMap<String, HashMap<String, Ruleset>> = report.impacted_files()
+            .into_iter()
+            .filter(|(uri, _impacted_ruleset)| {
+                !uri.starts_with("file:///root/.m2")
+            })
+            .collect();
+        println!("Parsed report has {:?} impacted files", impacted_files.len())
+    },
+    Err(e) => eprintln!("Error parsing YAML: {}", e),
+}
 
 
 }
